@@ -1,0 +1,23 @@
+## Interface: 16001
+## Title: |cff3fc7ebTight|r|cffffd100Lines|r
+## Notes: The ultimate fishing guide for WoW Forever: where every fish bites, live Auctionator prices, pool maps, fishing quests, gear and trainers.|n|n|cffffd100/tl|r to open.
+## Author: TightLines
+## Version: 0.1.0
+## Category: Professions
+## IconTexture: Interface\Icons\Trade_Fishing
+## SavedVariables: TightLinesDB
+## OptionalDeps: EllesmereUI, EllesmereUIBlizzardSkin, Auctionator, LibForeverData, QuestieDB
+## AddonCompartmentFunc: TightLines_OnAddonCompartmentClick
+
+Core.lua
+Data.lua
+Generated.lua
+Sources.lua
+Prices.lua
+Journal.lua
+MapView.lua
+WorldMap.lua
+UI.lua
+Tabs.lua
+Trips.lua
+Integrations.lua
