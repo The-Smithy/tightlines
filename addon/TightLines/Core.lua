@@ -246,7 +246,7 @@ end
 -------------------------------------------------------------------------------
 local DEFAULTS = {
   minimap = { angle = 215, hide = false },
-  settings = { worldMapPins = true, tooltip = true, logCatches = true, hints = true },
+  settings = { worldMapPins = true, tooltip = true, logCatches = true, hints = true, showPools = false },
   catches = {},
   -- The event journal (Journal.lua): raw fishing events for the creel analyzer
   journal = { v = 1, seq = 0, events = {}, chars = {}, names = { i = {}, m = {}, o = {} } },

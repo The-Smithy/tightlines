@@ -445,25 +445,31 @@ local function AddSpawnPoints(out, spawns, mapID, base, cap)
   return n
 end
 
+local POOL_SUB = { pool = "Pool spawn point", poolarea = "Its pools spawn around here." }
+
 function TL.PoolPoints(out, poolID, mapID, kind, cap)
   local pool = D.POOLS[poolID]
   return AddSpawnPoints(out, S.ObjectSpawns(poolID), mapID, {
-    kind = kind, color = kind == "pool" and pool and pool.color or nil,
+    kind = kind, color = pool and pool.color or nil,
     tip = pool and pool.name or "Fishing pool",
-    sub = kind == "hint" and "Pools spawn in this water: a good place to cast." or "Pool spawn point",
+    sub = POOL_SUB[kind],
   }, cap)
 end
 
-local function AddCatchPoints(out, mapID, itemID)
+local function IsKind(itemID, cat)
+  local fish = D.FISH_BY_ID[itemID]
+  return fish ~= nil and fish.cat == cat
+end
+
+-- cat: only catches of that kind (a fish's `cat`)
+local function AddCatchPoints(out, mapID, itemID, cat)
   local log = TL.db and TL.db.catches[mapID]
   for _, s in ipairs(log and log.spots or {}) do
-    if not itemID or s[3] == itemID then
+    if (not itemID or s[3] == itemID) and (not cat or IsKind(s[3], cat)) then
       out[#out + 1] = { x = s[1], y = s[2], kind = "catch", tip = TL.ItemName(s[3]), sub = "You caught this here." }
     end
   end
 end
-
-local HINT_CAP = 70
 
 -- Spots creel worked out from your logs: { x, y, count, x, y, count, ... }
 local function AddSpots(out, list, tip, kind, color)
@@ -483,40 +489,125 @@ local function GeneratedFish(id)
   return TL.Generated and TL.Generated.fish and TL.Generated.fish[id] or nil
 end
 
--- Where a fish is found on a map. Returns the points and how many are pools.
+-- Pool spawn points are an option (the "Pool locations" box on the maps). Off,
+-- the maps only highlight the water fish are found in.
+local function ShowPools()
+  return TL.db ~= nil and TL.db.settings.showPools == true
+end
+
+local AREA_CAP = 90
+local AREA_KIND = { coastal = "coast", inland = "inland" }
+local AREA_NAME = { coastal = "Coastal water", inland = "Inland water" }
+
+-- A kind of water on a map, as soft highlights. Pools only spawn in fishable
+-- water, so where the pools of a kind of water spawn traces that water.
+local function AddWater(out, water, mapID, sub)
+  local n = 0
+  for _, p in ipairs(D.WATER_POOLS[water] or {}) do
+    if n >= AREA_CAP then break end
+    n = n + AddSpawnPoints(out, S.ObjectSpawns(p), mapID,
+      { kind = AREA_KIND[water], tip = AREA_NAME[water], sub = sub }, AREA_CAP - n)
+  end
+  return n
+end
+
+-- Where a fish is found on a map. Returns the points and how many of them are
+-- its own pools (drawn as soft highlights, or as spawn points with the option).
 function TL.FishPoints(fish, mapID)
   TL:Index()
   local out, pools = {}, 0
+  local kind = ShowPools() and "pool" or "poolarea"
   for p in pairs(fish.poolSet or {}) do
-    pools = pools + TL.PoolPoints(out, p, mapID, "pool")
+    pools = pools + TL.PoolPoints(out, p, mapID, kind)
   end
+  local name = (TL.ItemName(fish.id))
   local g = GeneratedFish(fish.id)
-  local logged = AddSpots(out, g and g.zones and g.zones[mapID] and g.zones[mapID].spots, (TL.ItemName(fish.id)))
+  local logged = AddSpots(out, g and g.zones and g.zones[mapID] and g.zones[mapID].spots, name)
   local water = fish.water == "inland" and "inland" or (fish.water ~= "any" and "coastal") or nil
   if pools == 0 and logged == 0 and water and fish.zoneSet[mapID] and TL.db and TL.db.settings.hints then
-    local n = 0
-    for _, p in ipairs(D.WATER_POOLS[water]) do
-      n = n + TL.PoolPoints(out, p, mapID, "hint", HINT_CAP - n)
-      if n >= HINT_CAP then break end
-    end
+    AddWater(out, water, mapID, name .. " bites in this kind of water.")
   end
   AddCatchPoints(out, mapID, fish.id)
   return out, pools
 end
 
--- Every pool on a map and everything you caught there.
-function TL.ZonePoints(mapID)
+-- The kind of catch the zone pages are filtered to (the buttons above a zone's
+-- map), when this zone has any of it; nil is every kind.
+function TL.ZoneCat(mapID)
+  local want = TL.db and TL.db.zoneFilter
+  if not want then return nil end
+  local idx = TL:Index()
+  for id in pairs(idx.byZone[mapID] or {}) do
+    if IsKind(id, want) then return want end
+  end
+  return nil
+end
+
+-- A zone's map: the water its fish are found in, what your logs say, and
+-- (with the option) every pool spawn point. cat: only that kind of catch.
+function TL.ZonePoints(mapID, cat)
+  local idx = TL:Index()
   local out = {}
-  for id in pairs(D.POOLS) do TL.PoolPoints(out, id, mapID, "pool") end
+  -- Which fish live in which water here, for the highlights' tooltips
+  local names = { coastal = {}, inland = {} }
+  for id in pairs(idx.byZone[mapID] or {}) do
+    local fish = D.FISH_BY_ID[id]
+    local wanted = fish ~= nil
+    if wanted and cat then wanted = fish.cat == cat elseif wanted then wanted = fish.cat ~= "treasure" end
+    local water = wanted and fish.water
+    if wanted and water == "pool" then
+      water = nil
+      for p in pairs(fish.poolSet or {}) do
+        local pool = D.POOLS[p]
+        local spawns = pool and S.ObjectSpawns(p)
+        if spawns and spawns[mapID] then
+          water = pool.water
+          break
+        end
+      end
+    end
+    if wanted and names[water] then
+      table.insert(names[water], (TL.ItemName(id)))
+    end
+  end
+  for _, water in ipairs({ "coastal", "inland" }) do
+    local list = names[water]
+    table.sort(list)
+    local sub
+    if #list > 0 then
+      sub = table.concat(list, ", ", 1, math.min(#list, 8)) .. (#list > 8 and (" +" .. (#list - 8) .. " more") or "")
+    end
+    -- Filtered to one kind: only the water that kind is found in
+    if not cat or #list > 0 then AddWater(out, water, mapID, sub) end
+  end
   local G = TL.Generated or {}
-  for id, pool in pairs(G.pools or {}) do
-    local known = D.POOLS[id]
-    AddSpots(out, pool.spots and pool.spots[mapID], (known and known.name) or pool.name or "Fishing pool", "pool", known and known.color)
+  if ShowPools() then
+    for id, pool in pairs(D.POOLS) do
+      local wanted = not cat
+      for _, fishID in ipairs(pool.fish) do
+        if wanted then break end
+        wanted = IsKind(fishID, cat)
+      end
+      if wanted then TL.PoolPoints(out, id, mapID, "pool") end
+    end
+    for id, pool in pairs(G.pools or {}) do
+      local wanted = not cat
+      for itemID in pairs(pool.items or {}) do
+        if wanted then break end
+        wanted = IsKind(itemID, cat)
+      end
+      if wanted then
+        local known = D.POOLS[id]
+        AddSpots(out, pool.spots and pool.spots[mapID], (known and known.name) or pool.name or "Fishing pool", "pool", known and known.color)
+      end
+    end
   end
   for id, g in pairs(G.fish or {}) do
-    AddSpots(out, g.zones and g.zones[mapID] and g.zones[mapID].spots, (TL.ItemName(id)))
+    if not cat or IsKind(id, cat) then
+      AddSpots(out, g.zones and g.zones[mapID] and g.zones[mapID].spots, (TL.ItemName(id)))
+    end
   end
-  AddCatchPoints(out, mapID)
+  AddCatchPoints(out, mapID, nil, cat)
   return out
 end
 
@@ -582,7 +673,7 @@ function TL.TrackPoints(t, mapID)
     local fish = D.FISH_BY_ID[t.id]
     return fish and TL.FishPoints(fish, mapID) or {}
   elseif t.kind == "zone" then
-    return t.id == mapID and TL.ZonePoints(mapID) or {}
+    return t.id == mapID and TL.ZonePoints(mapID, TL.ZoneCat(mapID)) or {}
   elseif t.kind == "quest" then
     local q = S.Quest(t.id)
     return q and TL.QuestPoints(q, mapID) or {}

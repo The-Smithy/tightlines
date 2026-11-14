@@ -10,8 +10,12 @@ local CIRCLE = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMask"
 
 -- How each kind of point is drawn.
 local KIND = {
+  -- Soft highlights without a marker: a kind of water, or where a fish's pools are
+  coast    = { size = 0, hit = 18, glow = 44, glowA = 0.2, color = { 0.3, 0.72, 1 }, level = 1, area = true },
+  inland   = { size = 0, hit = 18, glow = 44, glowA = 0.22, color = { 0.45, 0.95, 0.5 }, level = 1, area = true },
+  poolarea = { size = 0, hit = 18, glow = 46, glowA = 0.26, level = 1, area = true },
+  -- Markers
   pool     = { size = 9, glow = 34, glowA = 0.34, pulse = true, level = 3 },
-  hint     = { size = 6, glow = 20, glowA = 0.16, a = 0.8, color = { 0.55, 0.8, 1 }, level = 1 },
   catch    = { size = 6, glow = 16, glowA = 0.25, color = { 1, 0.82, 0 }, level = 2 },
   spot     = { size = 7, glow = 22, glowA = 0.3, color = { 1, 0.6, 0.2 }, level = 2 },
   quest    = { icon = "Interface\\GossipFrame\\AvailableQuestIcon", size = 18, glow = 30, glowA = 0.35, color = { 1, 0.82, 0 }, level = 5 },
@@ -22,7 +26,8 @@ local KIND = {
 TL.PIN_KINDS = KIND
 
 local LEGEND = {
-  { "pool", "pool spawn" }, { "hint", "good water" }, { "spot", "logged spot" }, { "catch", "your catch" },
+  { "coast", "coastal water" }, { "inland", "inland water" }, { "poolarea", "its pools" },
+  { "pool", "pool spawn" }, { "spot", "logged spot" }, { "catch", "your catch", "your catches" },
   { "quest", "quest start" }, { "questEnd", "turn in" }, { "npc", "NPC" },
 }
 
@@ -42,8 +47,9 @@ function TL.StylePin(p, pt)
     p.dot:SetTexCoord(0, 1, 0, 1)
     p.dot:SetVertexColor(c[1], c[2], c[3], k.a or 1)
   end
-  p.dot:SetSize(k.size, k.size)
-  local ring = (not k.icon) or k.ring
+  p.dot:SetSize(math.max(k.size, 1), math.max(k.size, 1))
+  p.dot:SetShown(k.size > 0)
+  local ring = k.size > 0 and ((not k.icon) or k.ring)
   p.ring:SetShown(ring and true or false)
   p.ring:SetSize(k.size + 3, k.size + 3)
   if k.glow and k.glow > 0 then
@@ -53,7 +59,7 @@ function TL.StylePin(p, pt)
   else
     p.glow:Hide()
   end
-  local s = math.max(k.size + 4, 12)
+  local s = k.hit or math.max(k.size + 4, 12)
   p:SetSize(s, s)
   if p.label then
     if pt.label then
@@ -170,6 +176,41 @@ function TL.CreateMapView(parent, w, h)
   self.player:SetSize(26, 26)
   self.player:Hide()
 
+  -- Pool spawn points are off by default; this box turns them on, on every map
+  local toggle = CreateFrame("Button", nil, self.overlay)
+  toggle:SetSize(104, 20)
+  toggle:SetPoint("TOPRIGHT", -6, -5)
+  toggle.bg = toggle:CreateTexture(nil, "BACKGROUND")
+  toggle.bg:SetAllPoints()
+  toggle.bg:SetColorTexture(0, 0, 0, 0.6)
+  toggle.hl = toggle:CreateTexture(nil, "HIGHLIGHT")
+  toggle.hl:SetAllPoints()
+  toggle.hl:SetColorTexture(1, 1, 1, 0.08)
+  toggle.box = CreateFrame("Frame", nil, toggle, "BackdropTemplate")
+  toggle.box:SetSize(12, 12)
+  toggle.box:SetPoint("LEFT", 5, 0)
+  TL.UI.Backdrop(toggle.box, { 0.02, 0.03, 0.04, 1 }, { 0.45, 0.48, 0.54, 1 })
+  toggle.check = toggle.box:CreateTexture(nil, "OVERLAY")
+  toggle.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+  toggle.check:SetSize(18, 18)
+  toggle.check:SetPoint("CENTER", 0, 0)
+  toggle.text = TL.UI.Text(toggle, 10, TL.C.text)
+  toggle.text:SetPoint("LEFT", toggle.box, "RIGHT", 5, 0)
+  toggle.text:SetText("Pool locations")
+  toggle:SetScript("OnClick", function()
+    TL.db.settings.showPools = not TL.db.settings.showPools
+    TL.WorldMap.Refresh(true)
+    TL:Fire("TRACK")
+  end)
+  toggle:SetScript("OnEnter", function(button)
+    TL.UI.Tip(button, "Pool locations", {
+      "On: every spot a fishing pool can spawn at is marked, here and on the world map.",
+      "Off: the maps only highlight the water each fish is found in.",
+    }, "ANCHOR_TOP")
+  end)
+  toggle:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  self.toggle = toggle
+
   f:SetScript("OnUpdate", function(_, elapsed) self:OnUpdate(elapsed) end)
   self:SetMap(nil)
   return self
@@ -196,6 +237,7 @@ function MV:SetMap(mapID, emptyText)
     self.empty:Show()
     self.label:SetText("")
     self.labelBg:Hide()
+    self.toggle:Hide()
     return false
   end
 
@@ -234,12 +276,13 @@ function MV:SetMap(mapID, emptyText)
   end
   self.label:SetText(text)
   self.labelBg:Show()
+  self.toggle:Show()
   return true
 end
 
 function MV:SetPoints(points, note)
   self.used = 0
-  local counts = {}
+  local counts, colors = {}, {}
   if self.dw then
     for _, pt in ipairs(points or {}) do
       self.used = self.used + 1
@@ -254,21 +297,28 @@ function MV:SetPoints(points, note)
       p:SetFrameLevel(self.pinLayer:GetFrameLevel() + (k.level or 2))
       p:Show()
       counts[pt.kind] = (counts[pt.kind] or 0) + 1
+      colors[pt.kind] = colors[pt.kind] or pt.color
     end
   end
   for i = self.used + 1, #self.pins do self.pins[i]:Hide() end
 
+  -- The legend: highlights by name, markers with how many there are
   local parts = {}
   for _, entry in ipairs(LEGEND) do
     local n = counts[entry[1]]
     if n then
       local k = KIND[entry[1]]
-      local c = k.color or { TL.Accent() }
-      parts[#parts + 1] = TL.Dot(c) .. " " .. n .. " " .. entry[2] .. (n == 1 and "" or "s")
+      local c = colors[entry[1]] or k.color or { TL.Accent() }
+      if k.area then
+        parts[#parts + 1] = TL.Dot(c) .. " " .. entry[2]
+      else
+        parts[#parts + 1] = TL.Dot(c) .. " " .. n .. " " .. (n == 1 and entry[2] or (entry[3] or (entry[2] .. "s")))
+      end
     end
   end
   self.legend:SetText(table.concat(parts, "    "))
   self.legendBg:SetShown(#parts > 0)
+  self.toggle.check:SetShown(TL.db ~= nil and TL.db.settings.showPools == true)
 
   local showNote = self.dw and note and note ~= ""
   self.note:SetText(showNote and note or "")

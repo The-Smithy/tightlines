@@ -33,6 +33,8 @@ local SETTINGS = {
     apply = function() TL.WorldMap.Refresh(true) end },
   { key = "hints", label = "Mark good water for fish that have no pools",
     apply = function() TL:Fire("TRACK") end },
+  { key = "showPools", label = "Mark every pool spawn point on the maps",
+    apply = function() TL.WorldMap.Refresh(true) TL:Fire("TRACK") end },
   { key = "logCatches", label = "Log what I catch and where" },
   { key = "tooltip", label = "Show where a fish is found in its tooltip" },
 }

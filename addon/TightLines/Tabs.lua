@@ -128,7 +128,11 @@ local CAT_LABEL = {
   quest = "Quest fish", treasure = "Treasure & bloated fish", new = "Other catches from your logs",
 }
 
-local function FishRows(query, catchable)
+-- The kinds, in order, and their short names for the zone pages' filter
+local CAT_LIST = { "fish", "reagent", "event", "quest", "treasure", "new" }
+local CAT_SHORT = { fish = "Fish", reagent = "Reagents", event = "Rare", quest = "Quest", treasure = "Treasure", new = "Other" }
+
+local function FishRows(query, catchable, sort)
   local idx = TL:Index()
   local skill = TL.EffectiveSkill()
   local here = idx.byZone[TL.PlayerZone() or -1] or {}
@@ -145,22 +149,53 @@ local function FishRows(query, catchable)
     end
     if ok then list[#list + 1] = fish end
   end
-  table.sort(list, function(a, b)
-    if a.cat ~= b.cat then return (CAT_ORDER[a.cat] or 9) < (CAT_ORDER[b.cat] or 9) end
-    if (a.req or 999) ~= (b.req or 999) then return (a.req or 999) < (b.req or 999) end
-    return a.name < b.name
-  end)
+  -- By type: grouped under headings, easiest first. By anything else: one
+  -- flat list, with what has no value for that sort at the end either way.
+  local key, desc = (sort and sort.key) or "type", sort and sort.desc
+  local grouped = key == "type"
+  if grouped then
+    table.sort(list, function(a, b)
+      if a.cat ~= b.cat then return (CAT_ORDER[a.cat] or 9) < (CAT_ORDER[b.cat] or 9) end
+      if (a.req or 999) ~= (b.req or 999) then return (a.req or 999) < (b.req or 999) end
+      return a.name < b.name
+    end)
+  else
+    local value = {}
+    for _, fish in ipairs(list) do
+      if key == "price" then
+        value[fish] = TL.Prices.AH(fish.id) or TL.Prices.Vendor(fish.id)
+      elseif key == "skill" then
+        value[fish] = fish.req
+      elseif key == "zones" then
+        value[fish] = #fish.zoneList
+      else
+        value[fish] = (TL.ItemName(fish.id)):lower()
+      end
+    end
+    table.sort(list, function(a, b)
+      local va, vb = value[a], value[b]
+      if va ~= vb then
+        if va == nil then return false end
+        if vb == nil then return true end
+        if desc then return va > vb end
+        return va < vb
+      end
+      return a.name < b.name
+    end)
+  end
 
   local rows, cat, header = {}, nil, nil
   local accent = TL.AccentHex()
   for _, fish in ipairs(list) do
-    if fish.cat ~= cat then
-      cat = fish.cat
-      header = { header = true, text = CAT_LABEL[cat] or cat, n = 0 }
-      rows[#rows + 1] = header
+    if grouped then
+      if fish.cat ~= cat then
+        cat = fish.cat
+        header = { header = true, text = CAT_LABEL[cat] or cat, n = 0 }
+        rows[#rows + 1] = header
+      end
+      header.n = header.n + 1
+      header.count = tostring(header.n)
     end
-    header.n = header.n + 1
-    header.count = tostring(header.n)
     local name, quality = TL.ItemName(fish.id)
     local zones = #fish.zoneList
     local sub = FishTraits(fish) .. (zones > 0 and (", " .. zones .. (zones == 1 and " zone" or " zones")) or "")
@@ -310,6 +345,12 @@ end
 Add({
   key = "fish", label = "Fish", placeholder = "Search a fish or a zone",
   filterLabel = "Catchable", filterTip = "Only fish your Fishing skill can catch right now (time of day and season included).",
+  sorts = {
+    { key = "type", label = "Type", fixed = true, tip = "Grouped by kind, the easiest to catch first." },
+    { key = "name", label = "Name", tip = "Alphabetical." },
+    { key = "skill", label = "Skill", tip = "The Fishing skill needed in the easiest zone." },
+    { key = "price", label = "Price", desc = true, tip = "The Auction House price, or the vendor price when there is none." },
+  },
   emptyText = "No fish match. Clear the search or turn off Catchable.",
   rows = FishRows, select = FishDetail,
   default = function()
@@ -369,8 +410,52 @@ local function LogValue(mapID)
   return value / log.total, log.total
 end
 
+local function ZoneRow(mapID, here)
+  local state, low, high = TL.ZoneState(mapID)
+  local fish = ZoneFish(mapID)
+  local perCatch = LogValue(mapID)
+  local right, rightSub
+  if perCatch then
+    right, rightSub = TL.Money(perCatch, true), MUTED .. "per catch|r"
+  elseif fish[1] and TL.Prices.AH(fish[1].id) then
+    right, rightSub = TL.Money(TL.Prices.AH(fish[1].id), true), MUTED .. "top fish|r"
+  else
+    right, rightSub = "", ""
+  end
+  return {
+    key = mapID, icon = FISHING_ICON, text = TL.MapName(mapID), color = TL.STATE_COLORS[state],
+    sub = (mapID == here and (TL.AccentHex() .. "You are here|r  ") or "")
+      .. (low and ("Fishing " .. low .. "-" .. high) or "Skill unknown") .. ", " .. #fish .. " catches",
+    right = right, rightSub = rightSub,
+    tip = { TL.STATE_TEXT[state] or "" },
+  }
+end
+
+local RECENT_ZONES = 3
+
+-- The zone you are in, the last few you were in, then every zone under its
+-- continent. The continents start folded; a search shows every match instead.
 local function ZoneRows(query)
   local idx = TL:Index()
+  local here = TL.PlayerZone()
+  local rows = {}
+
+  if query == "" then
+    if here and S.IsZone(here) then
+      rows[#rows + 1] = { header = true, text = "You are here" }
+      rows[#rows + 1] = ZoneRow(here, here)
+    end
+    local shown = 0
+    for _, z in ipairs((TL.char and TL.char.recentZones) or {}) do
+      if shown >= RECENT_ZONES then break end
+      if z ~= here and idx.zones[z] and S.IsZone(z) then
+        if shown == 0 then rows[#rows + 1] = { header = true, text = "Recently visited" } end
+        rows[#rows + 1] = ZoneRow(z, here)
+        shown = shown + 1
+      end
+    end
+  end
+
   local list = {}
   for z in pairs(idx.zones) do
     if S.IsZone(z) and Match(TL.MapName(z), query) then
@@ -384,35 +469,19 @@ local function ZoneRows(query)
     end
     return S.ZoneSort(a.id, b.id)
   end)
-  local rows, cont, header = {}, nil, nil
-  local here = TL.PlayerZone()
-  local accent = TL.AccentHex()
+  local cont, header
   for _, z in ipairs(list) do
     if z.cont ~= cont then
       cont = z.cont
-      header = { header = true, text = z.contName, n = 0 }
+      local foldKey = "zones:" .. z.cont
+      local stored = TL.db.collapsed and TL.db.collapsed[foldKey]
+      header = { header = true, text = z.contName, n = 0, collapseKey = foldKey,
+        collapsed = query == "" and stored ~= false }
       rows[#rows + 1] = header
     end
     header.n = header.n + 1
     header.count = tostring(header.n)
-    local state, low, high = TL.ZoneState(z.id)
-    local fish = ZoneFish(z.id)
-    local perCatch = LogValue(z.id)
-    local right, rightSub
-    if perCatch then
-      right, rightSub = TL.Money(perCatch, true), MUTED .. "per catch|r"
-    elseif fish[1] and TL.Prices.AH(fish[1].id) then
-      right, rightSub = TL.Money(TL.Prices.AH(fish[1].id), true), MUTED .. "top fish|r"
-    else
-      right, rightSub = "", ""
-    end
-    rows[#rows + 1] = {
-      key = z.id, icon = FISHING_ICON, text = TL.MapName(z.id), color = TL.STATE_COLORS[state],
-      sub = (z.id == here and (accent .. "You are here|r  ") or "")
-        .. (low and ("Fishing " .. low .. "-" .. high) or "Skill unknown") .. ", " .. #fish .. " catches",
-      right = right, rightSub = rightSub,
-      tip = { TL.STATE_TEXT[state] or "" },
-    }
+    if not header.collapsed then rows[#rows + 1] = ZoneRow(z.id, here) end
   end
   return rows
 end
@@ -466,7 +535,23 @@ local function ZoneDetail(mapID)
     info[#info + 1] = LABEL .. "Your log:|r " .. log.total .. " catches so far."
   end
 
-  local fish = ZoneFish(mapID)
+  -- Every catch here, and the ones of the kind the page is filtered to
+  local all = ZoneFish(mapID)
+  local counts = {}
+  for _, f in ipairs(all) do counts[f.cat] = (counts[f.cat] or 0) + 1 end
+  local cat = TL.ZoneCat(mapID)
+  local filters = { { key = "all", label = "All", count = #all, tip = "Every kind of catch in this zone." } }
+  for _, c in ipairs(CAT_LIST) do
+    if counts[c] then
+      filters[#filters + 1] = { key = c, label = CAT_SHORT[c], count = counts[c],
+        tip = "Only " .. CAT_LABEL[c]:lower() .. ": in the list beside the map, and on the map." }
+    end
+  end
+  local fish = {}
+  for _, f in ipairs(all) do
+    if not cat or f.cat == cat then fish[#fish + 1] = f end
+  end
+
   local chips = {}
   for _, f in ipairs(fish) do
     local ah = TL.Prices.AH(f.id)
@@ -485,10 +570,15 @@ local function ZoneDetail(mapID)
 
   return {
     icon = FISHING_ICON, title = TL.MapName(mapID), titleColor = TL.STATE_COLORS[state],
-    sub = contName .. "  |  " .. #fish .. " kinds of catch",
-    info = info, chipLabel = "Catches", chips = chips, map = mapID,
+    sub = contName .. "  |  " .. #all .. " kinds of catch",
+    info = info, chipLabel = cat and CAT_SHORT[cat] or "Catches", chips = chips, map = mapID,
+    filters = filters, filter = cat or "all", filterLabel = "Show",
+    onFilter = function(key)
+      TL.db.zoneFilter = (key ~= "all") and key or nil
+      TL.WorldMap.Refresh(true)
+    end,
     points = function(m)
-      local points = TL.ZonePoints(m)
+      local points = TL.ZonePoints(m, TL.ZoneCat(m))
       return points, (#points == 0) and "No pool data for this zone yet. Your catches will mark the map as you fish." or nil
     end,
     actions = { TrackAction("zone", mapID, mapID) },

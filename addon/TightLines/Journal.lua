@@ -416,8 +416,26 @@ local function WriteGuideSnapshot()
   TL.db.guide = guide
 end
 
+-- The zones this character was in last, newest first (the Zones tab lists them).
+local MAX_RECENT_ZONES = 8
+local function RecordZone()
+  if not char then return end
+  local map = TL.PlayerZone()
+  if not map then return end
+  local recent = char.recentZones or {}
+  char.recentZones = recent
+  for i = #recent, 1, -1 do
+    if recent[i] == map then table.remove(recent, i) end
+  end
+  table.insert(recent, 1, map)
+  while #recent > MAX_RECENT_ZONES do table.remove(recent) end
+end
+
+TL:On("ZONE", RecordZone)
+
 TL:On("LOGIN", function()
   InitChar()
+  RecordZone()
   TrimIngested()
   WriteGuideSnapshot()
 end)
