@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TightLines preview</title>
+<style>
+  @font-face { font-family: "EUI"; src: url("/font/eui"); }
+  :root { --bar: #14171c; --line: #2a2f38; --text: #d9dce1; --dim: #8b919b; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #0b0d10; color: var(--text); font: 13px/1.4 system-ui, "Segoe UI", sans-serif; }
+  #bar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 8px 12px; background: var(--bar); border-bottom: 1px solid var(--line); }
+  #bar b { color: #ffd100; font-weight: 600; margin-right: 6px; }
+  #bar label { color: var(--dim); display: inline-flex; gap: 5px; align-items: center; }
+  #bar select, #bar input[type=number], #bar button { background: #0e1014; color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; font: inherit; }
+  #bar button { cursor: pointer; }
+  #bar button:hover { border-color: #4a5260; }
+  #state { margin-left: auto; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #state.busy { color: #ffd100; }
+  #wrap { position: relative; overflow: hidden; }
+  #stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; overflow: hidden;
+    background: radial-gradient(1200px 700px at 30% 20%, #33475a 0%, #1c2733 45%, #10161d 100%); }
+  #stage.plain { background: #1a1d22; }
+  #stage > div, #stage > input, #stage > img { position: absolute; }
+  .f { pointer-events: none; }
+  .f.hit { pointer-events: auto; }
+  .f.click { cursor: pointer; }
+  .t, .s { pointer-events: none; }
+  .s { font-family: "Friz Quadrata Std", "Friz Quadrata", "Friz Quadrata TT", "Palatino Linotype", "Book Antiqua", Georgia, serif; white-space: pre; overflow: hidden; display: flex; }
+  .s.eui, input.eui { font-family: "EUI", "Segoe UI", sans-serif; }
+  .s.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .s .inner { min-width: 0; }
+  .s.clip .inner { overflow: hidden; text-overflow: ellipsis; }
+  .s.shadow { text-shadow: 1px 1px 0 rgba(0,0,0,.85); }
+  .hl { display: none; }
+  .dot { display: inline-block; border-radius: 50%; vertical-align: -1px; }
+  .ico { display: inline-block; vertical-align: -2px; background: #555; border-radius: 2px; }
+  .icon { background-size: cover; background-position: center; }
+  .placeholder { display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,.85); font: 600 10px/1 system-ui, sans-serif;
+    background: linear-gradient(135deg, #2c5568, #16303d); letter-spacing: .3px; overflow: hidden; }
+  .unknown { outline: 1px dashed #ff3df2; background: rgba(255, 61, 242, .12); }
+  .maptile { background: #22313d; outline: 1px solid rgba(255,255,255,.04); outline-offset: -1px;
+    background-image: linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px); background-size: 20px 20px; }
+  .close { display: flex; align-items: center; justify-content: center; font: 700 14px/1 system-ui, sans-serif; }
+  .close.blizz { background: linear-gradient(#a32116, #5e0f08); border: 1px solid #d9b34a; border-radius: 4px; color: #ffd24a; }
+  .close.eui { color: rgba(255,255,255,.75); font-weight: 400; font-size: 18px; }
+  input.edit { background: transparent; border: 0; outline: 0; padding: 0; pointer-events: auto; font-family: "Friz Quadrata Std", "Palatino Linotype", Georgia, serif; }
+  #tip { position: absolute; z-index: 99999; background: rgba(8, 10, 22, .95); border: 1px solid #8a8f98; border-radius: 4px; padding: 7px 9px; max-width: 320px;
+    font-family: "Palatino Linotype", Georgia, serif; font-size: 12px; line-height: 1.35; pointer-events: none; }
+  #tip .row { display: flex; justify-content: space-between; gap: 18px; }
+  #tip .row:first-child { font-size: 14px; }
+  #notes { padding: 8px 12px; border-top: 1px solid var(--line); background: var(--bar); color: var(--dim); max-height: 28vh; overflow: auto; font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+  #notes .err { color: #ff7b72; }
+  #notes .chat { color: #9ecbff; }
+  #fatal { position: fixed; inset: 60px 40px auto 40px; z-index: 100000; background: #2a0f12; border: 1px solid #ff7b72; color: #ffd7d4; padding: 14px 16px; font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; max-height: 70vh; overflow: auto; display: none; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <b>TightLines preview</b>
+  <label>Look <select id="theme"><option value="standalone">Addon's own</option><option value="eui">EllesmereUI (approximation)</option></select></label>
+  <label>Zone <select id="zone"></select></label>
+  <label>Fishing <input id="skill" type="number" min="0" max="300" step="5" value="230" style="width:64px"></label>
+  <label>Lure <input id="lure" type="number" min="0" max="100" step="25" value="0" style="width:56px"></label>
+  <label>Faction <select id="faction"><option>Alliance</option><option>Horde</option></select></label>
+  <label><input id="auctionator" type="checkbox" checked> Auctionator</label>
+  <label><input id="lfd" type="checkbox" checked> LibForeverData</label>
+  <label>Data <select id="data"><option value="sample">Made-up trips</option><option value="empty">Nothing logged</option><option value="saved">My saved game data</option></select></label>
+  <label><input id="plain" type="checkbox"> Plain backdrop</label>
+  <button id="reset" title="Forget every click and start from the freshly opened window">Start over</button>
+  <span id="state">loading</span>
+</div>
+<div id="wrap"><div id="stage"></div></div>
+<div id="notes"></div>
+<div id="fatal"></div>
+<script>
+const ZONES = { 1444: "Feralas", 1429: "Elwynn Forest", 1411: "Durotar", 1439: "Darkshore", 1413: "The Barrens", 1437: "Wetlands",
+  1434: "Stranglethorn Vale", 1445: "Dustwallow Marsh", 1446: "Tanaris", 1447: "Azshara", 1425: "The Hinterlands", 1452: "Winterspring",
+  1423: "Eastern Plaguelands", 2548: "Riverglades (Forever)", 2521: "Zephras Isle (Forever)" };
+const $ = id => document.getElementById(id);
+const stage = $("stage"), wrap = $("wrap"), stateEl = $("state"), notes = $("notes"), fatal = $("fatal");
+for (const [id, name] of Object.entries(ZONES)) $("zone").add(new Option(name, id));
+
+const view = JSON.parse(localStorage.getItem("tightlines-preview") || "{}");
+const state = { actions: view.actions || [], options: view.options || {} };
+const controls = ["theme", "zone", "skill", "lure", "faction", "auctionator", "lfd", "data", "plain"];
+function readControls() {
+  const o = state.options;
+  o.theme = $("theme").value; o.zone = +$("zone").value; o.faction = $("faction").value;
+  o.skill = $("skill").value === "" || +$("skill").value === 0 ? false : +$("skill").value;
+  o.lure = +$("lure").value || 0;
+  o.auctionator = $("auctionator").checked; o.lfd = $("lfd").checked;
+  o.sample = $("data").value === "sample"; o.saved = $("data").value === "saved";
+  o.data = $("data").value; o.plain = $("plain").checked;
+}
+function writeControls() {
+  const o = state.options;
+  if (o.theme) $("theme").value = o.theme;
+  if (o.zone) $("zone").value = o.zone;
+  if (o.faction) $("faction").value = o.faction;
+  if (o.skill !== undefined) $("skill").value = o.skill === false ? 0 : o.skill;
+  if (o.lure !== undefined) $("lure").value = o.lure;
+  if (o.auctionator !== undefined) $("auctionator").checked = o.auctionator;
+  if (o.lfd !== undefined) $("lfd").checked = o.lfd;
+  if (o.data) $("data").value = o.data;
+  $("plain").checked = !!o.plain;
+}
+$("zone").value = 1444;
+writeControls();
+const params = new URLSearchParams(location.search);
+const pendingClicks = (params.get("clicks") || "").split(";").filter(Boolean).map(p => p.split(",").map(Number));
+if ([...params.keys()].length) {
+  state.actions = [];
+  for (const id of ["theme", "zone", "faction", "data", "skill", "lure"]) if (params.has(id)) $(id).value = params.get(id);
+  if (params.has("plain")) $("plain").checked = true;
+}
+for (const id of controls) $(id).addEventListener("change", () => { readControls(); render(); });
+$("reset").onclick = () => { state.actions = []; render(); };
+
+const rgba = (c, a = 1) => c ? `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${(c[3] === undefined ? 1 : c[3]) * a})` : "transparent";
+const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+// The game's text codes: |cAARRGGBB ... |r colours, |T texture |t, |n line break.
+function markup(text) {
+  let html = "", open = false, i = 0;
+  while (i < text.length) {
+    if (text[i] === "|") {
+      const rest = text.slice(i);
+      let m;
+      if ((m = /^\|c[0-9a-fA-F]{2}([0-9a-fA-F]{6})/.exec(rest))) { if (open) html += "</span>"; html += `<span style="color:#${m[1]}">`; open = true; i += m[0].length; continue; }
+      if (rest.startsWith("|r")) { if (open) html += "</span>"; open = false; i += 2; continue; }
+      if (rest.startsWith("|n")) { html += "\n"; i += 2; continue; }
+      if (rest.startsWith("||")) { html += "|"; i += 2; continue; }
+      if ((m = /^\|T([^|]*)\|t/.exec(rest))) {
+        const p = m[1].split(":"), size = +p[1] || 12;
+        if (/TempPortraitAlphaMask/i.test(p[0])) html += `<span class="dot" style="width:${size}px;height:${size}px;background:rgb(${p[11] || 255},${p[12] || 255},${p[13] || 255})"></span>`;
+        else if (/ReadyCheck-Ready/i.test(p[0])) html += `<span style="color:#3ddc5a">&#10004;</span>`;
+        else if (/ReadyCheck-NotReady/i.test(p[0])) html += `<span style="color:#ff5a4d">&#10008;</span>`;
+        else html += `<span class="ico" style="width:${size}px;height:${size}px"></span>`;
+        i += m[0].length; continue;
+      }
+    }
+    html += esc(text[i]); i++;
+  }
+  return html + (open ? "</span>" : "");
+}
+
+function initials(name) {
+  const words = name.replace(/^Raw /, "").split(/\s+/).filter(Boolean);
+  return (words.length > 1 ? words[0][0] + words[1][0] : (words[0] || "?").slice(0, 2)).toUpperCase();
+}
+
+function texture(n) {
+  const el = document.createElement("div");
+  el.className = "t";
+  const vc = n.vc || [1, 1, 1, 1];
+  const file = n.file === undefined ? null : String(n.file);
+  if (n.solid) {
+    el.style.background = rgba([n.solid[0] * vc[0], n.solid[1] * vc[1], n.solid[2] * vc[2], n.solid[3] * (vc[3] === undefined ? 1 : vc[3])]);
+  } else if (/WHITE8X8/i.test(file)) {
+    el.style.background = rgba(vc);
+  } else if (/TempPortraitAlphaMask/i.test(file)) {
+    el.style.background = rgba(vc); el.style.borderRadius = "50%";
+  } else if (/^maptile:/.test(file)) {
+    el.classList.add("maptile");
+  } else if (/^item:/.test(file)) {
+    el.classList.add("placeholder"); el.textContent = initials(file.split(":").slice(2).join(":") || "?");
+    el.title = "Item icon (the game supplies the art)";
+  } else if (/^Interface\\Icons\\/i.test(file)) {
+    const name = file.split("\\").pop().toLowerCase();
+    el.classList.add("icon", "placeholder");
+    const img = new Image();
+    img.onload = () => { el.style.backgroundImage = `url(${img.src})`; el.classList.remove("placeholder"); el.textContent = ""; };
+    img.src = `https://wow.zamimg.com/images/wow/icons/large/${name}.jpg`;
+    el.textContent = initials(name.replace(/^(inv|trade|spell)_/, "").replace(/_/g, " "));
+  } else if (/UI-CheckBox-Check/i.test(file)) {
+    el.innerHTML = '<svg viewBox="0 0 20 20" width="100%" height="100%"><path d="M4 10 L8.5 14.5 L16 5.5" fill="none" stroke="#ffd100" stroke-width="2.6"/></svg>';
+  } else if (/UI-(Plus|Minus)Button-Up/i.test(file)) {
+    const plus = /Plus/i.test(file);
+    el.innerHTML = `<svg viewBox="0 0 12 12" width="100%" height="100%"><rect x=".5" y=".5" width="11" height="11" rx="2" fill="#3a2a10" stroke="#c9a23a"/><path d="M3 6 H9${plus ? " M6 3 V9" : ""}" stroke="#ffd100" stroke-width="1.6"/></svg>`;
+  } else if (/UI-SortArrow/i.test(file)) {
+    // The game's column-sort arrow: it points down, and up when its texture is flipped.
+    const up = n.tc && n.tc[2] > n.tc[3];
+    el.innerHTML = `<svg viewBox="0 0 10 10" width="100%" height="100%"><path d="${up ? "M5 2 L9 8 L1 8 Z" : "M1 2 L9 2 L5 8 Z"}" fill="${rgba(vc)}"/></svg>`;
+  } else if (/MinimapArrow/i.test(file)) {
+    el.innerHTML = '<svg viewBox="0 0 20 20" width="100%" height="100%"><path d="M10 2 L16 17 L10 13 L4 17 Z" fill="#ffd100" stroke="#000" stroke-width="1"/></svg>';
+  } else if (/AvailableQuestIcon/i.test(file)) {
+    el.classList.add("close"); el.style.color = "#ffd100"; el.style.fontSize = n.h + "px"; el.textContent = "!";
+  } else if (/ActiveQuestIcon/i.test(file)) {
+    el.classList.add("close"); el.style.color = "#ffd100"; el.style.fontSize = n.h + "px"; el.textContent = "?";
+  } else {
+    el.classList.add("unknown"); el.title = "Game art not in the preview: " + file;
+  }
+  if (n.blend === "ADD") el.style.mixBlendMode = "screen";
+  if (n.rot) el.style.transform = `rotate(${-n.rot}rad)`;
+  if (n.gray) el.style.filter = "grayscale(1)";
+  return el;
+}
+
+function fontString(n) {
+  const el = document.createElement("div");
+  el.className = "s" + (n.wrap ? " wrap" : " clip") + (n.shadow ? " shadow" : "") + (n.font === "eui" ? " eui" : "");
+  el.style.fontSize = n.size + "px";
+  el.style.lineHeight = (n.size * 1.18 + (n.sp || 0)) + "px";
+  el.style.color = rgba(n.color);
+  const jh = (n.jh || "CENTER").toLowerCase();
+  el.style.justifyContent = jh === "left" ? "flex-start" : jh === "right" ? "flex-end" : "center";
+  el.style.textAlign = jh;
+  const jv = n.jv || "MIDDLE";
+  el.style.alignItems = jv === "TOP" ? "flex-start" : jv === "BOTTOM" ? "flex-end" : "center";
+  const inner = document.createElement("div");
+  inner.className = "inner";
+  inner.innerHTML = markup(n.text);
+  if (n.max && n.wrap) { inner.style.display = "-webkit-box"; inner.style.webkitLineClamp = n.max; inner.style.webkitBoxOrient = "vertical"; inner.style.overflow = "hidden"; }
+  el.appendChild(inner);
+  return el;
+}
+
+// A font string the addon gave no size: the model estimated one, but the page's
+// own text is what you see, so it hangs from the same anchor instead of being
+// clipped to the estimate.
+function hang(el, n) {
+  if (n.hx) {
+    el.style.width = "max-content"; el.style.overflow = "visible";
+    if (n.hx === "r") { el.style.left = (n.x + n.w) + "px"; el.style.transform = "translateX(-100%)"; }
+    else if (n.hx === "c") { el.style.left = (n.x + n.w / 2) + "px"; el.style.transform = "translateX(-50%)"; }
+  }
+  if (n.vy) {
+    el.style.height = "auto"; el.style.overflow = "visible";
+    const tx = n.hx === "r" ? "translateX(-100%) " : n.hx === "c" ? "translateX(-50%) " : "";
+    if (n.vy === "b") { el.style.top = (n.y + n.h) + "px"; el.style.transform = tx + "translateY(-100%)"; }
+    else if (n.vy === "m") { el.style.top = (n.y + n.h / 2) + "px"; el.style.transform = tx + "translateY(-50%)"; }
+  }
+}
+
+let hoverTimer = null, wheelBusy = false, focusId = null, caret = 0;
+
+function draw(data) {
+  stage.textContent = "";
+  stage.style.width = data.screen.w + "px"; stage.style.height = data.screen.h + "px";
+  stage.className = state.options.plain ? "plain" : "";
+  let z = 1;
+  for (const n of data.nodes) {
+    let el;
+    if (n.k === "f") {
+      el = document.createElement("div");
+      el.className = "f";
+      if (n.bg) el.style.background = rgba(n.bg);
+      if (n.bd) el.style.boxShadow = `inset 0 0 0 ${n.edge || 1}px ${rgba(n.bd)}`;
+      if (n.template) { el.classList.add("close", n.template === "close-eui" ? "eui" : "blizz"); el.textContent = "×"; }
+      if (n.click || n.enter || n.wheel) {
+        el.classList.add("hit");
+        if (n.click) el.classList.add("click");
+        el.addEventListener("mouseenter", () => {
+          stage.querySelectorAll(`[data-hl="${n.id}"]`).forEach(h => h.style.display = "block");
+          if (n.enter) { clearTimeout(hoverTimer); hoverTimer = setTimeout(() => tip(n.id), 140); }
+        });
+        el.addEventListener("mouseleave", () => {
+          stage.querySelectorAll(`[data-hl="${n.id}"]`).forEach(h => h.style.display = "none");
+          clearTimeout(hoverTimer); hideTip();
+        });
+        if (n.click) el.addEventListener("click", () => { state.actions.push({ type: "click", id: n.id }); render(); });
+        if (n.wheel) el.addEventListener("wheel", e => {
+          e.preventDefault();
+          if (wheelBusy) return;
+          wheelBusy = true;
+          state.actions.push({ type: "wheel", id: n.id, delta: e.deltaY > 0 ? -1 : 1 });
+          render().finally(() => { wheelBusy = false; });
+        }, { passive: false });
+      }
+    } else if (n.k === "t") {
+      el = texture(n);
+    } else {
+      el = fontString(n);
+    }
+    el.style.left = n.x + "px"; el.style.top = n.y + "px"; el.style.width = n.w + "px"; el.style.height = n.h + "px";
+    el.style.opacity = n.a; el.style.zIndex = z++;
+    if (n.k === "s") hang(el, n);
+    if (n.hl) { el.classList.add("hl"); el.dataset.hl = n.f; }
+    stage.appendChild(el);
+    if (n.k === "f" && n.edit) {
+      const input = document.createElement("input");
+      input.className = "edit" + (n.edit.font === "eui" ? " eui" : "");
+      input.value = n.edit.text; input.spellcheck = false;
+      input.style.left = (n.x + n.edit.inset) + "px"; input.style.top = n.y + "px";
+      input.style.width = (n.w - n.edit.inset * 2) + "px"; input.style.height = n.h + "px";
+      input.style.fontSize = n.edit.size + "px"; input.style.color = rgba(n.edit.color); input.style.zIndex = 90000;
+      let timer;
+      input.addEventListener("input", () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          const last = state.actions[state.actions.length - 1];
+          if (last && last.type === "text" && last.id === n.id) last.value = input.value;
+          else state.actions.push({ type: "text", id: n.id, value: input.value });
+          focusId = n.id; caret = input.selectionStart;
+          render();
+        }, 220);
+      });
+      input.addEventListener("blur", () => { if (focusId === n.id) focusId = null; });
+      stage.appendChild(input);
+      if (focusId === n.id) { input.focus(); input.setSelectionRange(caret, caret); }
+    }
+  }
+  fit();
+  const lines = [];
+  for (const e of data.errors || []) lines.push(`<span class="err">Lua error: ${esc(e)}</span>`);
+  if ((data.missing || []).length) lines.push("Not modelled (ignored): " + esc(data.missing.join(", ")));
+  for (const c of data.chat || []) lines.push(`<span class="chat">[chat] ${markup(c)}</span>`);
+  notes.innerHTML = lines.join("\n");
+  notes.style.display = lines.length ? "block" : "none";
+  fit();
+  stateEl.textContent = `${data.nodes.length} regions, ${data.ms} ms` + (data.lfd ? `, LibForeverData ${data.lfd}` : ", no LibForeverData")
+    + `, ${state.actions.length} actions replayed`;
+}
+
+function fit() {
+  const w = +stage.style.width.replace("px", "") || 1366, h = +stage.style.height.replace("px", "") || 768;
+  const room = window.innerHeight - $("bar").offsetHeight - (notes.style.display === "none" ? 0 : notes.offsetHeight);
+  const scale = Math.min(window.innerWidth / w, Math.max(200, room) / h);
+  stage.style.transform = `scale(${scale})`;
+  wrap.style.height = (h * scale) + "px";
+}
+window.addEventListener("resize", fit);
+
+let tipEl = null;
+function hideTip() { if (tipEl) { tipEl.remove(); tipEl = null; } }
+async function tip(id) {
+  const data = await ask({ ...state, hover: id });
+  hideTip();
+  const t = data && data.tooltip;
+  if (!t) return;
+  tipEl = document.createElement("div");
+  tipEl.id = "tip";
+  tipEl.innerHTML = t.lines.map(l => `<div class="row"><span style="color:${rgba(l.lc)}">${markup(l.l)}</span>${l.r ? `<span style="color:${rgba(l.rc)}">${markup(l.r)}</span>` : ""}</div>`).join("");
+  stage.appendChild(tipEl);
+  const top = t.where === "ANCHOR_TOP";
+  tipEl.style.left = (top ? t.x : t.x + t.w + 4) + "px";
+  tipEl.style.top = Math.max(0, (top ? t.y - tipEl.offsetHeight - 4 : t.y - tipEl.offsetHeight)) + "px";
+}
+
+async function ask(body) {
+  const res = await fetch("/render", { method: "POST", body: JSON.stringify(body) });
+  return res.json();
+}
+
+let rendering = null;
+async function render() {
+  localStorage.setItem("tightlines-preview", JSON.stringify({ actions: state.actions, options: state.options }));
+  stateEl.className = "busy";
+  const job = (async () => {
+    try {
+      const data = await ask(state);
+      if (data.error) {
+        fatal.style.display = "block";
+        fatal.textContent = "The addon stopped with an error:\n\n" + data.error;
+      } else {
+        fatal.style.display = "none";
+        draw(data);
+        if (pendingClicks.length) {
+          const [x, y] = pendingClicks.shift();
+          let hit = null;
+          for (const n of data.nodes) {
+            if (n.k === "f" && n.click && x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + n.h) hit = n;
+          }
+          if (hit) state.actions.push({ type: "click", id: hit.id });
+          setTimeout(render, 0);
+        }
+      }
+    } catch (e) {
+      fatal.style.display = "block";
+      fatal.textContent = "No answer from creel preview: " + e;
+    }
+    stateEl.className = "";
+  })();
+  rendering = job;
+  return job;
+}
+
+// Re-render when a file of the addon or the preview changes.
+let stamp = null;
+setInterval(async () => {
+  try {
+    const now = await (await fetch("/stamp")).text();
+    if (stamp !== null && now !== stamp) {
+      if (now.split(" ")[1] !== stamp.split(" ")[1]) location.reload(); // the page itself changed
+      else render();
+    }
+    stamp = now;
+  } catch (e) { /* the server is restarting */ }
+}, 700);
+
+readControls();
+render();
+</script>
+</body>
+</html>

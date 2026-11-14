@@ -7,3 +7,4 @@ edition = "2024"
 anyhow = "1.0.104"
 clap = { version = "4", features = ["derive", "env"] }
 rusqlite = { version = "0.42.0", features = ["bundled"] }
+tiny_http = "0.12.0"

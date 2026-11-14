@@ -7,6 +7,7 @@ Everything lives in this folder. The game folder is only where the addon is inst
 ```
 addon/TightLines/   the addon's source (the copy in the game is installed from here)
 creel/              the Rust tool: journal -> SQLite -> Generated.lua, and the installer
+preview/            the addon's window in a web browser: a model of the game's UI, and the page that draws it
 tests/              the addon run against a mock of the game's API, and the end-to-end check
 ```
 
@@ -27,6 +28,7 @@ cargo run --release -- <command>      # or: cargo install --path . and then just
 |---|---|
 | `creel` or `creel sync` | Read every account's journal, then rebuild `Generated.lua` (in `addon/TightLines` and in the installed copy) |
 | `creel install` | Copy the addon from `addon/TightLines` into the game |
+| `creel preview` | Show the addon's window in a web browser, re-rendered whenever a file changes |
 | `creel report` | What the logs say against what the guide says: new catches, new zones, measured skills, pool contents, errors inside the addon |
 | `creel trips` | Stored fishing trips, newest first (`--character <name>`, `--limit <n>`) |
 | `creel ingest` / `creel build` | The two halves of `sync` |
@@ -39,6 +41,23 @@ Defaults, each with a flag and an environment variable:
 - `--addon` / `CREEL_ADDON`: the addon source, `addon\TightLines` in this folder
 
 The database is the only complete copy of the history: once creel has stored journal events, the addon drops them.
+
+## Preview
+
+`creel preview` opens http://127.0.0.1:7878 and draws the addon's window there, so layout and theme can be worked on without the game. Save a file under `addon/TightLines` and the page renders again, on the same tab and selection.
+
+Each render runs LuaJIT on `preview/host.lua`: it loads the addon's real files in TOC order against a model of the game's UI (frames, textures, font strings, the anchor rules), opens the window, replays your clicks, scrolling and typing, and prints what is on screen. `preview/index.html` draws that. A Lua error in the addon shows on the page with its traceback.
+
+The bar at the top switches between the addon's own look and an approximation of EllesmereUI's skin, and sets the zone, fishing skill, faction, which other addons are present, and whether there is made-up or real saved data. The same settings work in the address, such as `/?theme=eui&zone=1447`.
+
+It is a model, so some things are only close:
+
+- **Text sizes are estimated** and the page uses a stand-in for the game's font, so text-width-dependent spacing is approximate.
+- **Game art is not there.** Item icons and zone maps are placeholders (the art is inside the game's archives); named interface icons are fetched from Wowhead's icon server; anything else unknown is outlined in pink.
+- **The EllesmereUI look is hand-made** from what its skin does (flat dark panels, grey borders, its accent colour, its font read from the installed addon), not its code.
+- **Calls the model does not know** are ignored and listed under the window.
+
+`node tests/preview-check.mjs` (with the preview running) renders every tab in both looks and reports errors, regions outside the window and overlapping text.
 
 ## The journal
 

@@ -10,6 +10,7 @@
 
 mod analyze;
 mod lua;
+mod preview;
 mod store;
 
 use anyhow::{Context, Result, bail};
@@ -53,6 +54,14 @@ enum Command {
     },
     /// Copy the addon from the project folder into the game
     Install,
+    /// Show the addon's window in a web browser, re-rendered whenever a file changes
+    Preview {
+        #[arg(long, default_value_t = 7878)]
+        port: u16,
+        /// Don't open the browser
+        #[arg(long)]
+        no_open: bool,
+    },
     /// Compare what the logs say with what the guide says
     Report,
     /// List stored fishing trips, newest first
@@ -209,6 +218,16 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Some(Command::Install) => return install(&source, &installed),
+        Some(Command::Preview { port, no_open }) => {
+            let tool = Path::new(env!("CARGO_MANIFEST_DIR"));
+            let preview = preview::Preview {
+                project: tool.parent().unwrap_or(tool).to_path_buf(),
+                addon: source,
+                saved: store::find_saved_variables(&cli.wow).into_iter().next().map(|(_, path)| path),
+                wow: cli.wow,
+            };
+            return preview.serve(port, !no_open);
+        }
         _ => {}
     }
 
@@ -223,7 +242,7 @@ fn main() -> Result<()> {
         Command::Build { out } => build(&conn, &out.map(|o| vec![o]).unwrap_or(generated))?,
         Command::Report => print!("{}", analyze::report(&conn)?),
         Command::Trips { character, limit } => print!("{}", analyze::trips(&conn, character.as_deref(), limit)?),
-        Command::Install | Command::Paths => {}
+        Command::Install | Command::Paths | Command::Preview { .. } => {}
     }
     Ok(())
 }
